@@ -214,4 +214,45 @@ def imageflow_demo(predictor, vis_folder, current_time, args, exp):
 
     logger.info("Saving detection result in {}".format(img_save_path))
     for img_idx, (output, img) in enumerate(zip(outputs, ori_frames[:len(outputs)])):
-        if args
+        if args.save_result:
+            for item in output:
+                if item is None:
+                    continue
+                bbox = item[0]
+                score = item[1]
+                cls = int(item[2])
+                label = f"{VID_classes[cls]}: {score:.2f}"
+                img = vis(img, bbox, label)
+        vid_writer.write(img)
+
+    vid_writer.release()
+    logger.info("Finished processing video")
+
+def main(exp, args):
+    current_time = time.localtime()
+    vis_folder = "YOLOX_outputs/{}/vis_res/{}".format(args.experiment_name, time.strftime("%Y_%m_%d_%H_%M_%S", current_time))
+    os.makedirs(vis_folder, exist_ok=True)
+    logger.info("Args: {}".format(args))
+    
+    predictor = Predictor(exp, args)
+
+    if args.path.endswith('.mp4') or args.path.endswith('.avi'):
+        imageflow_demo(predictor, vis_folder, current_time, args, exp)
+    else:
+        image_demo(predictor, vis_folder, args.path, current_time, args.save_result)
+
+if __name__ == "__main__":
+    parser = make_parser()
+    args = parser.parse_args()
+    exp = get_exp(args.exp_file, args.name)
+    
+    if args.fuse:
+        exp.fuse = True
+    if args.legacy:
+        exp.legacy = True
+
+    if args.fp16:
+        torch.backends.cudnn.benchmark = True
+        torch.backends.cudnn.deterministic = True
+    
+    main(exp, args)
