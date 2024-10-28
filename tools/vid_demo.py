@@ -112,38 +112,64 @@ def imageflow_demo(predictor, vis_folder, current_time, args, exp):
     P, Cls = exp.defualt_p, exp.num_classes
 
     cap = cv2.VideoCapture(args.path)
-    width = cap.get(cv2.CAP_PROP_FRAME_WIDTH)  # float
-    height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)  # float
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))  # int type to match cv2.VideoWriter
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))  # int type to match cv2.VideoWriter
     fps = cap.get(cv2.CAP_PROP_FPS)
+    
     save_folder = os.path.join(
         vis_folder, time.strftime("%Y_%m_%d_%H_%M_%S", current_time)
     )
     os.makedirs(save_folder, exist_ok=True)
     ratio = min(predictor.test_size[0] / height, predictor.test_size[1] / width)
+    
     vid_save_path = os.path.join(save_folder, args.path.split("/")[-1])
-    img_save_path = save_folder
-    logger.info(f"video save_path is {vid_save_path}")
+    logger.info(f"Video save path: {vid_save_path}")
+    
+    # Check for None values in fps, width, and height before using them
+    if fps == 0 or width == 0 or height == 0:
+        logger.error("Error: Could not retrieve video properties (fps, width, height).")
+        return
+
     vid_writer = cv2.VideoWriter(
-        vid_save_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (int(width), int(height))
+        vid_save_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height)
     )
+
     frames = []
     outputs = []
     ori_frames = []
+    frame_count = 0  # Track the number of frames processed
+    
     while True:
         ret_val, frame = cap.read()
-        if ret_val:
-            ori_frames.append(frame)
-            frame, _ = predictor.preproc(frame, None, exp.test_size)
-            frames.append(torch.tensor(frame, dtype=torch.float32))  # Convert frame to float32
-        else:
+        if not ret_val:
+            logger.info("End of video reached or could not read frame.")
             break
+        
+        frame_count += 1
+        ori_frames.append(frame)
+        
+        # Process the frame
+        frame, _ = predictor.preproc(frame, None, exp.test_size)
+        frames.append(torch.tensor(frame, dtype=torch.float32))  # Convert frame to float32
 
-    # Processing frames logic...
+    logger.info(f"Total frames read: {frame_count}")
+    
+    # Loop to process each frame and write output
     for img_idx, (output, img) in enumerate(zip(outputs, ori_frames[:len(outputs)])):
         result_frame = predictor.visual(output, img, ratio, cls_conf=args.conf)
-        if args.save_result:
-            vid_writer.write(result_frame)
-            cv2.imwrite(os.path.join(img_save_path, str(img_idx) + '.jpg'), result_frame)
+        
+        # Ensure result_frame is not None before writing
+        if result_frame is not None:
+            if args.save_result:
+                vid_writer.write(result_frame)
+                cv2.imwrite(os.path.join(save_folder, f"{img_idx}.jpg"), result_frame)
+        else:
+            logger.error(f"Error: result_frame is None for frame index {img_idx}")
+
+    cap.release()
+    vid_writer.release()
+    logger.info(f"Saved video at {vid_save_path}")
+
 
 def main(exp, args):
     if not args.experiment_name:
