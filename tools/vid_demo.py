@@ -64,7 +64,7 @@ def make_parser():
     parser.add_argument(
         "--fp16",
         dest="fp16",
-        default=True,
+        default=False, ######################################
         action="store_true",
         help="Adopting mix precision evaluating.",
     )
@@ -137,6 +137,8 @@ def imageflow_demo(predictor, vis_folder, current_time, args,exp):
     P, Cls = exp.defualt_p, exp.num_classes
 
     cap = cv2.VideoCapture(args.path)
+
+    
     width = cap.get(cv2.CAP_PROP_FRAME_WIDTH)  # float
     height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)  # float
     fps = cap.get(cv2.CAP_PROP_FPS)
