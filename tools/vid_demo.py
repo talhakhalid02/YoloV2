@@ -162,7 +162,8 @@ def imageflow_demo(predictor, vis_folder, current_time, args,exp):
         if ret_val:
             ori_frames.append(frame)
             frame, _ = predictor.preproc(frame, None, exp.test_size)
-            frames.append(torch.tensor(frame))
+            # frames.append(torch.tensor(frame))
+            frames.append(torch.tensor(frame).half()) ###############################################################
         else:
             break
     res = []
@@ -197,7 +198,7 @@ def imageflow_demo(predictor, vis_folder, current_time, args,exp):
         ele = torch.stack(ele)
         t0 = time.time()
         if traj_linking:
-            pred_result, adj_list, fc_output = predictor.inference(ele, lframe=frame_num, gframe=0)
+            pred_result, adj_list, fc_output = predictor.inference(elehalf(), lframe=frame_num, gframe=0) #############################################################
             if len(outputs) != 0:  # skip the connection frame
                 pred_result = pred_result[1:]
                 fc_output = fc_output[1:]
@@ -205,7 +206,7 @@ def imageflow_demo(predictor, vis_folder, current_time, args,exp):
             adj_lists.extend(adj_list)
             fc_outputs.append(fc_output)
         else:
-            outputs.extend(predictor.inference(ele,lframe=lframe,gframe=gframe))
+            outputs.extend(predictor.inference(ele.half(),lframe=lframe,gframe=gframe)) #############################################################
     if traj_linking:
         outputs = post_linking(fc_outputs, adj_lists, outputs, P, Cls, names, exp)
 
@@ -250,6 +251,7 @@ def main(exp, args):
         exp.test_size = (args.tsize, args.tsize)
 
     model = exp.get_model()
+    model.half()  # Convert model to half-precision ###############################################
 
     logger.info("Model Summary: {}".format(get_model_info(model, exp.test_size)))
 
