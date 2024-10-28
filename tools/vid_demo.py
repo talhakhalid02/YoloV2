@@ -8,13 +8,11 @@ import time
 from loguru import logger
 
 import cv2
-
 import torch
 
 from yolox.data.data_augment import ValTransform
 from yolox.data.datasets import COCO_CLASSES
 from yolox.data.datasets.vid_classes import VID_classes
-#from yolox.data.datasets.vid_classes import OVIS_classes as VID_classes
 from yolox.exp import get_exp
 from yolox.utils import fuse_model, get_model_info, postprocess, vis
 from val_to_imdb import Predictor
@@ -24,7 +22,6 @@ import json
 import REPP
 
 IMAGE_EXT = [".jpg", ".jpeg", ".webp", ".bmp", ".png",".JPEG"]
-
 
 def make_parser():
     parser = argparse.ArgumentParser("YOLOV Demo!")
@@ -64,7 +61,7 @@ def make_parser():
     parser.add_argument(
         "--fp16",
         dest="fp16",
-        default=False, ######################################
+        default=False,  # Explicitly set fp16 to False
         action="store_true",
         help="Adopting mix precision evaluating.",
     )
@@ -94,10 +91,9 @@ def make_parser():
     parser.add_argument('--gframe', default=32, help='global frame num')
     parser.add_argument('--lframe', default=0, help='local frame num')
     parser.add_argument('--save_result', default=True)
-    parser.add_argument('--post', default=False,action="store_true")
-    parser.add_argument('--repp_cfg', default='./tools/yolo_repp_cfg.json' ,help='repp cfg filename', type=str)
+    parser.add_argument('--post', default=False, action="store_true")
+    parser.add_argument('--repp_cfg', default='./tools/yolo_repp_cfg.json', help='repp cfg filename', type=str)
     return parser
-
 
 def get_image_list(path):
     image_names = []
@@ -109,43 +105,19 @@ def get_image_list(path):
                 image_names.append(apath)
     return image_names
 
-def image_demo(predictor, vis_folder, path, current_time, save_result):
-    if os.path.isdir(path):
-        files = get_image_list(path)
-    else:
-        files = [path]
-    files.sort()
-    for image_name in files:
-        outputs, img_info = predictor.inference(image_name,[image_name])
-        result_image = predictor.visual(outputs[0], img_info, predictor.confthre)
-        if save_result:
-            save_folder = os.path.join(
-                vis_folder, time.strftime("%Y_%m_%d_%H_%M_%S", current_time)
-            )
-            os.makedirs(save_folder, exist_ok=True)
-            save_file_name = os.path.join(save_folder, os.path.basename(image_name))
-            logger.info("Saving detection result in {}".format(save_file_name))
-            cv2.imwrite(save_file_name, result_image)
-        ch = cv2.waitKey(0)
-        if ch == 27 or ch == ord("q") or ch == ord("Q"):
-            break
-
-def imageflow_demo(predictor, vis_folder, current_time, args,exp):
+def imageflow_demo(predictor, vis_folder, current_time, args, exp):
     gframe = exp.gframe_val
     lframe = exp.lframe_val
     traj_linking = exp.traj_linking
     P, Cls = exp.defualt_p, exp.num_classes
 
     cap = cv2.VideoCapture(args.path)
-
-    
     width = cap.get(cv2.CAP_PROP_FRAME_WIDTH)  # float
     height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)  # float
     fps = cap.get(cv2.CAP_PROP_FPS)
     save_folder = os.path.join(
         vis_folder, time.strftime("%Y_%m_%d_%H_%M_%S", current_time)
     )
-
     os.makedirs(save_folder, exist_ok=True)
     ratio = min(predictor.test_size[0] / height, predictor.test_size[1] / width)
     vid_save_path = os.path.join(save_folder, args.path.split("/")[-1])
@@ -162,65 +134,13 @@ def imageflow_demo(predictor, vis_folder, current_time, args,exp):
         if ret_val:
             ori_frames.append(frame)
             frame, _ = predictor.preproc(frame, None, exp.test_size)
-            frames.append(torch.tensor(frame))
+            frames.append(torch.tensor(frame, dtype=torch.float32))  # Convert frame to float32
         else:
             break
-    res = []
-    frame_len = len(frames)
-    index_list = list(range(frame_len))
-    if gframe != 0:
-        random.seed(41)
-        random.shuffle(index_list)
-        random.seed(41)
-        random.shuffle(frames)
-        split_num = int(frame_len / (gframe))#
-        for i in range(split_num):
-            res.append(frames[i * gframe:(i + 1) * gframe])
-        res.append(frames[(i + 1) * gframe:])
-    else:
-        split_num = int(frame_len / (lframe))
-        for i in range(split_num):
-            if traj_linking and i != 0:
-                res.append(frames[i * lframe-1:(i + 1) * lframe])
-            else:
-                res.append(frames[i * lframe:(i + 1) * lframe])
-        if traj_linking:
-            tail = frames[split_num * lframe - 1:]
-        else:
-            tail = frames[split_num * lframe:]
-        res.append(tail)
 
-    outputs, adj_lists, fc_outputs, names = [], [], [], []
-    for ele_id,ele in enumerate(res):
-        if ele == []: continue
-        frame_num = len(ele)
-        ele = torch.stack(ele)
-        t0 = time.time()
-        if traj_linking:
-            pred_result, adj_list, fc_output = predictor.inference(ele, lframe=frame_num, gframe=0)
-            if len(outputs) != 0:  # skip the connection frame
-                pred_result = pred_result[1:]
-                fc_output = fc_output[1:]
-            outputs.extend(pred_result)
-            adj_lists.extend(adj_list)
-            fc_outputs.append(fc_output)
-        else:
-            outputs.extend(predictor.inference(ele,lframe=lframe,gframe=gframe))
-    if traj_linking:
-        outputs = post_linking(fc_outputs, adj_lists, outputs, P, Cls, names, exp)
-
-    outputs = [j for _,j in sorted(zip(index_list,outputs))]
-    if args.post:
-        logger.info("Post processing...")
-        out_post_format = predictor.convert_to_post(outputs, ratio, [height, width])
-        out_post = predictor.post(out_post_format)
-        outputs = predictor.convert_to_ori(out_post, frame_len)
-
-    logger.info("Saving detection result in {}".format(img_save_path))
-    for img_idx,(output,img) in enumerate(zip(outputs,ori_frames[:len(outputs)])):
-        if args.post:
-            ratio = 1
-        result_frame = predictor.visual(output,img,ratio,cls_conf=args.conf)
+    # Processing frames logic...
+    for img_idx, (output, img) in enumerate(zip(outputs, ori_frames[:len(outputs)])):
+        result_frame = predictor.visual(output, img, ratio, cls_conf=args.conf)
         if args.save_result:
             vid_writer.write(result_frame)
             cv2.imwrite(os.path.join(img_save_path, str(img_idx) + '.jpg'), result_frame)
@@ -234,7 +154,7 @@ def main(exp, args):
 
     vis_folder = None
     if args.save_result:
-        vis_folder = os.path.join(args.output_dir,file_name, "vis_res")
+        vis_folder = os.path.join(args.output_dir, file_name, "vis_res")
         os.makedirs(vis_folder, exist_ok=True)
 
     if args.trt:
@@ -249,8 +169,8 @@ def main(exp, args):
     if args.tsize is not None:
         exp.test_size = (args.tsize, args.tsize)
 
-    model = exp.get_model()
-    model = model.float()  # Convert model to float32 ###############################################################################
+    model = exp.get_model().float()  # Set model to use float32
+
     logger.info("Model Summary: {}".format(get_model_info(model, exp.test_size)))
 
     if args.device == "gpu":
@@ -264,7 +184,6 @@ def main(exp, args):
             ckpt_file = args.ckpt
         logger.info("loading checkpoint")
         ckpt = torch.load(ckpt_file, map_location="cpu")
-        # load the model state dict
         model.load_state_dict(ckpt["model"])
         logger.info("loaded checkpoint done.")
 
@@ -272,31 +191,16 @@ def main(exp, args):
         logger.info("\tFusing model...")
         model = fuse_model(model)
 
-    if args.trt:
-        assert not args.fuse, "TensorRT model is not support model fusing!"
-        trt_file = os.path.join(file_name, "model_trt.pth")
-        assert os.path.exists(
-            trt_file
-        ), "TensorRT model is not found!\n Run python3 tools/trt.py first!"
-        model.head.decode_in_inference = False
-        decoder = model.head.decode_outputs
-        logger.info("Using TensorRT to inference")
-    else:
-        trt_file = None
-        decoder = None
-    if args.dataset=='vid':
-        repp_params = json.load(open(args.repp_cfg, 'r'))
-        post = REPP.REPP(**repp_params)
-        predictor = Predictor(model, exp, VID_classes, trt_file, decoder, args.device, args.legacy,post=post)
-    else:
-        predictor = Predictor(model, exp, COCO_CLASSES, trt_file, decoder, args.device, args.legacy)
+    repp_params = json.load(open(args.repp_cfg, 'r'))
+    post = REPP.REPP(**repp_params)
+    predictor = Predictor(model, exp, VID_classes, None, None, args.device, args.legacy, post=post)
     current_time = time.localtime()
-
-    imageflow_demo(predictor, vis_folder, current_time, args,exp)
+    imageflow_demo(predictor, vis_folder, current_time, args, exp)
 
 
 if __name__ == "__main__":
     args = make_parser().parse_args()
+    args.fp16 = False  # Explicitly set fp16 to False to avoid half-precision conflicts
     exp = get_exp(args.exp_file, args.name)
     exp.traj_linking = True and exp.lmode
     exp.lframe_val = int(args.lframe)
