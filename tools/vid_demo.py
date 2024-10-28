@@ -267,6 +267,8 @@ def main(exp, args):
         ckpt = torch.load(ckpt_file, map_location="cpu")
         # load the model state dict
         model.load_state_dict(ckpt["model"])
+        if args.fp16:
+            model.half()  ########################################################################
         logger.info("loaded checkpoint done.")
 
     if args.fuse:
