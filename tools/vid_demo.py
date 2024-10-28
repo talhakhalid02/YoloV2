@@ -64,7 +64,7 @@ def make_parser():
     parser.add_argument(
         "--fp16",
         dest="fp16",
-        default=False,                       ################################################### 
+        default=True,                       ################################################### 
         action="store_true",
         help="Adopting mix precision evaluating.",
     )
@@ -163,7 +163,7 @@ def imageflow_demo(predictor, vis_folder, current_time, args,exp):
             ori_frames.append(frame)
             frame, _ = predictor.preproc(frame, None, exp.test_size)
             # frames.append(torch.tensor(frame))
-            frames.append(torch.tensor(frame, dtype=torch.float32))  ###########################################################
+            frames.append(torch.tensor(frame).half())  ###########################################################
         else:
             break
     res = []
@@ -267,6 +267,7 @@ def main(exp, args):
         ckpt = torch.load(ckpt_file, map_location="cpu")
         # load the model state dict
         model.load_state_dict(ckpt["model"])
+        
         if args.fp16:
             model.half()  ########################################################################
         logger.info("loaded checkpoint done.")
