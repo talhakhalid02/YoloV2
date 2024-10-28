@@ -162,7 +162,8 @@ def imageflow_demo(predictor, vis_folder, current_time, args,exp):
         if ret_val:
             ori_frames.append(frame)
             frame, _ = predictor.preproc(frame, None, exp.test_size)
-            frames.append(torch.tensor(frame))
+            # frames.append(torch.tensor(frame))
+            frames.append(torch.tensor(frame, dtype=torch.float32))  ###########################################################
         else:
             break
     res = []
