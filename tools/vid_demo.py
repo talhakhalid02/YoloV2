@@ -6,10 +6,8 @@ import argparse
 import os
 import time
 from loguru import logger
-
 import cv2
 import torch
-
 from yolox.data.data_augment import ValTransform
 from yolox.data.datasets import COCO_CLASSES
 from yolox.data.datasets.vid_classes import VID_classes
@@ -21,7 +19,7 @@ import random
 import json
 import REPP
 
-IMAGE_EXT = [".jpg", ".jpeg", ".webp", ".bmp", ".png",".JPEG"]
+IMAGE_EXT = [".jpg", ".jpeg", ".webp", ".bmp", ".png", ".JPEG"]
 
 def make_parser():
     parser = argparse.ArgumentParser("YOLOV Demo!")
@@ -52,8 +50,8 @@ def make_parser():
     parser.add_argument(
         "--dataset",
         default='vid',
-        type = str,
-        help = "Decide pred classes"
+        type=str,
+        help="Decide pred classes"
     )
     parser.add_argument("--conf", default=0.05, type=float, help="test conf")
     parser.add_argument("--nms", default=0.5, type=float, help="test nms threshold")
@@ -61,7 +59,7 @@ def make_parser():
     parser.add_argument(
         "--fp16",
         dest="fp16",
-        default=False,  # Explicitly set fp16 to False
+        default=True, 
         action="store_true",
         help="Adopting mix precision evaluating.",
     )
@@ -105,6 +103,27 @@ def get_image_list(path):
                 image_names.append(apath)
     return image_names
 
+def image_demo(predictor, vis_folder, path, current_time, save_result):
+    if os.path.isdir(path):
+        files = get_image_list(path)
+    else:
+        files = [path]
+    files.sort()
+    for image_name in files:
+        outputs, img_info = predictor.inference(image_name,[image_name])
+        result_image = predictor.visual(outputs[0], img_info, predictor.confthre)
+        if save_result:
+            save_folder = os.path.join(
+                vis_folder, time.strftime("%Y_%m_%d_%H_%M_%S", current_time)
+            )
+            os.makedirs(save_folder, exist_ok=True)
+            save_file_name = os.path.join(save_folder, os.path.basename(image_name))
+            logger.info("Saving detection result in {}".format(save_file_name))
+            cv2.imwrite(save_file_name, result_image)
+        ch = cv2.waitKey(0)
+        if ch == 27 or ch == ord("q") or ch == ord("Q"):
+            break
+
 def imageflow_demo(predictor, vis_folder, current_time, args, exp):
     gframe = exp.gframe_val
     lframe = exp.lframe_val
@@ -112,123 +131,87 @@ def imageflow_demo(predictor, vis_folder, current_time, args, exp):
     P, Cls = exp.defualt_p, exp.num_classes
 
     cap = cv2.VideoCapture(args.path)
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))  # int type to match cv2.VideoWriter
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))  # int type to match cv2.VideoWriter
+
+    width = cap.get(cv2.CAP_PROP_FRAME_WIDTH)  # float
+    height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)  # float
     fps = cap.get(cv2.CAP_PROP_FPS)
-    
     save_folder = os.path.join(
         vis_folder, time.strftime("%Y_%m_%d_%H_%M_%S", current_time)
     )
+
     os.makedirs(save_folder, exist_ok=True)
     ratio = min(predictor.test_size[0] / height, predictor.test_size[1] / width)
-    
     vid_save_path = os.path.join(save_folder, args.path.split("/")[-1])
-    logger.info(f"Video save path: {vid_save_path}")
-    
-    # Check for None values in fps, width, and height before using them
-    if fps == 0 or width == 0 or height == 0:
-        logger.error("Error: Could not retrieve video properties (fps, width, height).")
-        return
-
+    img_save_path = save_folder
+    logger.info(f"video save_path is {vid_save_path}")
     vid_writer = cv2.VideoWriter(
-        vid_save_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height)
+        vid_save_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (int(width), int(height))
     )
-
     frames = []
     outputs = []
     ori_frames = []
-    frame_count = 0  # Track the number of frames processed
     
     while True:
         ret_val, frame = cap.read()
-        if not ret_val:
-            logger.info("End of video reached or could not read frame.")
+        if ret_val:
+            ori_frames.append(frame)
+            frame, _ = predictor.preproc(frame, None, exp.test_size)
+            frames.append(torch.tensor(frame).to(torch.float16))  # Convert to FP16
+        else:
             break
-        
-        frame_count += 1
-        ori_frames.append(frame)
-        
-        # Process the frame
-        frame, _ = predictor.preproc(frame, None, exp.test_size)
-        frames.append(torch.tensor(frame, dtype=torch.float32))  # Convert frame to float32
 
-    logger.info(f"Total frames read: {frame_count}")
-    
-    # Loop to process each frame and write output
+    res = []
+    frame_len = len(frames)
+    index_list = list(range(frame_len))
+    if gframe != 0:
+        random.seed(41)
+        random.shuffle(index_list)
+        random.seed(41)
+        random.shuffle(frames)
+        split_num = int(frame_len / (gframe))
+        for i in range(split_num):
+            res.append(frames[i * gframe:(i + 1) * gframe])
+        res.append(frames[(i + 1) * gframe:])
+    else:
+        split_num = int(frame_len / (lframe))
+        for i in range(split_num):
+            if traj_linking and i != 0:
+                res.append(frames[i * lframe - 1:(i + 1) * lframe])
+            else:
+                res.append(frames[i * lframe:(i + 1) * lframe])
+        if traj_linking:
+            tail = frames[split_num * lframe - 1:]
+        else:
+            tail = frames[split_num * lframe:]
+        res.append(tail)
+
+    outputs, adj_lists, fc_outputs, names = [], [], [], []
+    for ele_id, ele in enumerate(res):
+        if ele == []: 
+            continue
+        frame_num = len(ele)
+        ele = torch.stack(ele).to(torch.float16)  # Ensure tensor is in FP16
+        t0 = time.time()
+        if traj_linking:
+            pred_result, adj_list, fc_output = predictor.inference(ele, lframe=frame_num, gframe=0)
+            if len(outputs) != 0:  # skip the connection frame
+                pred_result = pred_result[1:]
+                fc_output = fc_output[1:]
+            outputs.extend(pred_result)
+            adj_lists.extend(adj_list)
+            fc_outputs.append(fc_output)
+        else:
+            outputs.extend(predictor.inference(ele, lframe=lframe, gframe=gframe))
+    if traj_linking:
+        outputs = post_linking(fc_outputs, adj_lists, outputs, P, Cls, names, exp)
+
+    outputs = [j for _, j in sorted(zip(index_list, outputs))]
+    if args.post:
+        logger.info("Post processing...")
+        out_post_format = predictor.convert_to_post(outputs, ratio, [height, width])
+        out_post = predictor.post(out_post_format)
+        outputs = predictor.convert_to_ori(out_post, frame_len)
+
+    logger.info("Saving detection result in {}".format(img_save_path))
     for img_idx, (output, img) in enumerate(zip(outputs, ori_frames[:len(outputs)])):
-        result_frame = predictor.visual(output, img, ratio, cls_conf=args.conf)
-        
-        # Ensure result_frame is not None before writing
-        if result_frame is not None:
-            if args.save_result:
-                vid_writer.write(result_frame)
-                cv2.imwrite(os.path.join(save_folder, f"{img_idx}.jpg"), result_frame)
-        else:
-            logger.error(f"Error: result_frame is None for frame index {img_idx}")
-
-    cap.release()
-    vid_writer.release()
-    logger.info(f"Saved video at {vid_save_path}")
-
-
-def main(exp, args):
-    if not args.experiment_name:
-        args.experiment_name = exp.exp_name
-
-    file_name = os.path.join(exp.output_dir, args.experiment_name)
-    os.makedirs(file_name, exist_ok=True)
-
-    vis_folder = None
-    if args.save_result:
-        vis_folder = os.path.join(args.output_dir, file_name, "vis_res")
-        os.makedirs(vis_folder, exist_ok=True)
-
-    if args.trt:
-        args.device = "gpu"
-
-    logger.info("Args: {}".format(args))
-
-    if args.conf is not None:
-        exp.test_conf = args.conf
-    if args.nms is not None:
-        exp.nmsthre = args.nms
-    if args.tsize is not None:
-        exp.test_size = (args.tsize, args.tsize)
-
-    model = exp.get_model().float()  # Set model to use float32
-
-    logger.info("Model Summary: {}".format(get_model_info(model, exp.test_size)))
-
-    if args.device == "gpu":
-        model.cuda()
-    model.eval()
-
-    if not args.trt:
-        if args.ckpt is None:
-            ckpt_file = os.path.join(file_name, "best_ckpt.pth")
-        else:
-            ckpt_file = args.ckpt
-        logger.info("loading checkpoint")
-        ckpt = torch.load(ckpt_file, map_location="cpu")
-        model.load_state_dict(ckpt["model"])
-        logger.info("loaded checkpoint done.")
-
-    if args.fuse:
-        logger.info("\tFusing model...")
-        model = fuse_model(model)
-
-    repp_params = json.load(open(args.repp_cfg, 'r'))
-    post = REPP.REPP(**repp_params)
-    predictor = Predictor(model, exp, VID_classes, None, None, args.device, args.legacy, post=post)
-    current_time = time.localtime()
-    imageflow_demo(predictor, vis_folder, current_time, args, exp)
-
-
-if __name__ == "__main__":
-    args = make_parser().parse_args()
-    args.fp16 = False  # Explicitly set fp16 to False to avoid half-precision conflicts
-    exp = get_exp(args.exp_file, args.name)
-    exp.traj_linking = True and exp.lmode
-    exp.lframe_val = int(args.lframe)
-    exp.gframe_val = int(args.gframe)
-    main(exp, args)
+        if args
