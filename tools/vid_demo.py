@@ -209,6 +209,8 @@ def imageflow_demo(predictor, vis_folder, current_time, args,exp):
             outputs.extend(predictor.inference(ele.half(),lframe=lframe,gframe=gframe)) #############################################################
     if traj_linking:
         outputs = post_linking(fc_outputs, adj_lists, outputs, P, Cls, names, exp)
+    
+    logger.info(f"Frame tensor dtype: {frames.dtype}")#############################################################
 
     outputs = [j for _,j in sorted(zip(index_list,outputs))]
     if args.post:
@@ -252,7 +254,7 @@ def main(exp, args):
 
     model = exp.get_model()
     model.half()  # Convert model to half-precision ###############################################
-
+    logger.info(f"Model dtype: {next(model.parameters()).dtype}") #############################################################
     logger.info("Model Summary: {}".format(get_model_info(model, exp.test_size)))
 
     if args.device == "gpu":
