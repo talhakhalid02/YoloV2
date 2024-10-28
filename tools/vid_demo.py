@@ -64,7 +64,7 @@ def make_parser():
     parser.add_argument(
         "--fp16",
         dest="fp16",
-        default=True,                     
+        default=True,         ##########################################################            
         action="store_true",
         help="Adopting mix precision evaluating.",
     )
@@ -198,7 +198,8 @@ def imageflow_demo(predictor, vis_folder, current_time, args,exp):
         ele = torch.stack(ele)
         t0 = time.time()
         if traj_linking:
-            pred_result, adj_list, fc_output = predictor.inference(elehalf(), lframe=frame_num, gframe=0) #############################################################
+            pred_result, adj_list, fc_output = predictor.inference(ele.half(), lframe=frame_num, gframe=0) #############################################################
+            # pred_result, adj_list, fc_output = predictor.inference(ele, lframe=frame_num, gframe=0)
             if len(outputs) != 0:  # skip the connection frame
                 pred_result = pred_result[1:]
                 fc_output = fc_output[1:]
@@ -207,6 +208,7 @@ def imageflow_demo(predictor, vis_folder, current_time, args,exp):
             fc_outputs.append(fc_output)
         else:
             outputs.extend(predictor.inference(ele.half(),lframe=lframe,gframe=gframe)) #############################################################
+            # outputs.extend(predictor.inference(ele,lframe=lframe,gframe=gframe))
     if traj_linking:
         outputs = post_linking(fc_outputs, adj_lists, outputs, P, Cls, names, exp)
     
