@@ -64,7 +64,7 @@ def make_parser():
     parser.add_argument(
         "--fp16",
         dest="fp16",
-        default=True,         ##########################################################            
+        default=True,
         action="store_true",
         help="Adopting mix precision evaluating.",
     )
@@ -137,8 +137,6 @@ def imageflow_demo(predictor, vis_folder, current_time, args,exp):
     P, Cls = exp.defualt_p, exp.num_classes
 
     cap = cv2.VideoCapture(args.path)
-
-    
     width = cap.get(cv2.CAP_PROP_FRAME_WIDTH)  # float
     height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)  # float
     fps = cap.get(cv2.CAP_PROP_FPS)
@@ -163,7 +161,6 @@ def imageflow_demo(predictor, vis_folder, current_time, args,exp):
             ori_frames.append(frame)
             frame, _ = predictor.preproc(frame, None, exp.test_size)
             frames.append(torch.tensor(frame))
-            # frames.append(torch.tensor(frame).half()) ###############################################################
         else:
             break
     res = []
@@ -198,7 +195,6 @@ def imageflow_demo(predictor, vis_folder, current_time, args,exp):
         ele = torch.stack(ele)
         t0 = time.time()
         if traj_linking:
-            # pred_result, adj_list, fc_output = predictor.inference(ele.half(), lframe=frame_num, gframe=0) #############################################################
             pred_result, adj_list, fc_output = predictor.inference(ele, lframe=frame_num, gframe=0)
             if len(outputs) != 0:  # skip the connection frame
                 pred_result = pred_result[1:]
@@ -207,12 +203,9 @@ def imageflow_demo(predictor, vis_folder, current_time, args,exp):
             adj_lists.extend(adj_list)
             fc_outputs.append(fc_output)
         else:
-            # outputs.extend(predictor.inference(ele.half(),lframe=lframe,gframe=gframe)) #############################################################
             outputs.extend(predictor.inference(ele,lframe=lframe,gframe=gframe))
     if traj_linking:
         outputs = post_linking(fc_outputs, adj_lists, outputs, P, Cls, names, exp)
-    
-    logger.info(f"Frame tensor dtype: {frames.dtype}")#############################################################
 
     outputs = [j for _,j in sorted(zip(index_list,outputs))]
     if args.post:
@@ -255,8 +248,6 @@ def main(exp, args):
         exp.test_size = (args.tsize, args.tsize)
 
     model = exp.get_model()
-    # model.half()  # Convert model to half-precision ###############################################
-    logger.info(f"Model dtype: {next(model.parameters()).dtype}") #############################################################
     logger.info("Model Summary: {}".format(get_model_info(model, exp.test_size)))
 
     if args.device == "gpu":
@@ -272,7 +263,6 @@ def main(exp, args):
         ckpt = torch.load(ckpt_file, map_location="cpu")
         # load the model state dict
         model.load_state_dict(ckpt["model"])
-        
         logger.info("loaded checkpoint done.")
 
     if args.fuse:
