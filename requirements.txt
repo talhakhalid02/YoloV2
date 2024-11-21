@@ -19,6 +19,6 @@ scikit-learn
 
 # verified versions
 pycocotools>=2.0.2
-onnx
-onnxruntime
-onnx-simplifier
+# onnx
+# onnxruntime
+# onnx-simplifier
